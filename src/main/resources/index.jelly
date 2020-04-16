@@ -1,0 +1,4 @@
+<?jelly escape-by-default='true'?>
+<div>
+    Modifies Jenkins to use round robin for job scheduling.
+</div>
