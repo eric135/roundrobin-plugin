@@ -33,7 +33,7 @@ public class RoundRobinPlugin extends Plugin {
     @Override
     public void start() throws Exception {
         load();
-        final Jenkins activeInstance = Jenkins.getActiveInstance();
+        final Jenkins activeInstance = Jenkins.get();
         LoadBalancer currentLoadBalancer = activeInstance.getQueue().getLoadBalancer();
         LoadBalancer roundRobinLoadBalancer = new RoundRobinLoadBalancer(currentLoadBalancer);
         activeInstance.getQueue().setLoadBalancer(roundRobinLoadBalancer);

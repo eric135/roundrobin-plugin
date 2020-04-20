@@ -26,7 +26,6 @@
 package com.ericnewberry.jenkinsci.roundrobin;
 
 import com.google.common.base.Preconditions;
-import hudson.model.Executor;
 import hudson.model.Job;
 import hudson.model.LoadBalancer;
 import hudson.model.Queue.Task;
@@ -37,7 +36,6 @@ import hudson.model.queue.MappingWorksheet.WorkChunk;
 import hudson.model.queue.SubTask;
 
 import java.io.Serializable;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -45,8 +43,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.logging.Logger;
 
-import static java.util.logging.Level.FINE;
-import static java.util.logging.Level.WARNING;
+import static java.util.logging.Level.*;
 
 public class RoundRobinLoadBalancer extends LoadBalancer {
     private static final Logger LOGGER = Logger.getLogger(RoundRobinLoadBalancer.class.getCanonicalName());
@@ -109,66 +106,69 @@ public class RoundRobinLoadBalancer extends LoadBalancer {
 
     private boolean assignRoundRobin(Mapping mapping) {
         for (int workchunk = 0; workchunk < mapping.size(); workchunk++) {
+            String subtask = mapping.get(workchunk).get(0).getDisplayName();
             String label = mapping.get(workchunk).get(0).getAssignedLabel().getExpression();
             String assignedExecutor = "";
+
+            LOGGER.log(FINER, "Attempting to schedule '" + subtask + "', label '" + label + "'");
 
             // Get applicable executors, sorted by name
             List<ExecutorChunk> executors = getApplicableSorted(mapping.get(workchunk));
 
             if (executors.size() == 0) {
                 // No available executors - fall back to default load balancer
-                LOGGER.log(WARNING, "Unable to schedule '" + label + "': No available executors");
-                return false;
-            }
-
-            // Check whether work chunk has never been scheduled before or last runner is no more
-            boolean isLastRunnerValid = false;
-
-            if (lastRunner.containsKey(label)) {
-                for (ExecutorChunk executor : executors) {
-                    if (executor.getName().compareTo(lastRunner.get(label)) == 0) {
-                        isLastRunnerValid = true;
-                    }
-                }
-            }
-
-            if (!isLastRunnerValid) {
-                // This label has not been scheduled yet or previous executor no longer exists
-                // Therefore, run on first node alphabetically
-                LOGGER.log(FINE, "First time scheduling label '" + label + "' or previous last runner gone");
-                lastRunner.put(label, executors.get(0).getName());
-                assignedExecutor = executors.get(0).getName();
-                mapping.assign(workchunk, executors.get(0));
+                LOGGER.log(FINE, "Unable to schedule '" + subtask + "', label '" + label + "' at this time': No available executors");
             }
             else {
-                // Schedule using round robin from last executor
-                int lastPos = -1;
-                for (int i = 0; i < executors.size(); i++) {
-                    if (executors.get(i).getName().compareTo(lastRunner.get(label)) == 0) {
-                        lastPos = i;
-                        break;
+                // Check whether work chunk has never been scheduled before or last runner is no more
+                boolean isLastRunnerValid = false;
+
+                if (lastRunner.containsKey(label)) {
+                    for (ExecutorChunk executor : executors) {
+                        if (executor.getName().compareTo(lastRunner.get(label)) == 0) {
+                            isLastRunnerValid = true;
+                        }
                     }
                 }
 
-                if (lastPos == -1) {
-                    // Internal error
-                    LOGGER.log(WARNING, "Unable to schedule '" + label + "': Couldn't find last executor position");
+                if (!isLastRunnerValid) {
+                    // This label has not been scheduled yet or previous executor no longer exists
+                    // Therefore, run on first node alphabetically
+                    LOGGER.log(FINE, "First time scheduling '" + subtask + "', label '" + label + "' or previous last runner gone");
+                    lastRunner.put(label, executors.get(0).getName());
+                    assignedExecutor = executors.get(0).getName();
+                    mapping.assign(workchunk, executors.get(0));
+                }
+                else {
+                    // Schedule using round robin from last executor
+                    int lastPos = -1;
+                    for (int i = 0; i < executors.size(); i++) {
+                        if (executors.get(i).getName().compareTo(lastRunner.get(label)) == 0) {
+                            lastPos = i;
+                            break;
+                        }
+                    }
+
+                    if (lastPos == -1) {
+                        // Internal error
+                        LOGGER.log(WARNING, "Unable to schedule '" + subtask + "', label '" + label + "': Couldn't find last executor position");
+                        return false;
+                    }
+
+                    // Schedule on next node
+                    int runner = (lastPos + 1) % executors.size();
+                    lastRunner.put(label, executors.get(runner).getName());
+                    assignedExecutor = executors.get(runner).getName();
+                    mapping.assign(workchunk, executors.get(runner));
+                }
+
+                if (!mapping.isPartiallyValid()) {
+                    LOGGER.log(WARNING, "Unable to schedule '" + subtask + "', label '" + label + "': Mapping to '" + assignedExecutor + "' not partially valid");
                     return false;
                 }
 
-                // Schedule on next node
-                int runner = (lastPos + 1) % executors.size();
-                lastRunner.put(label, executors.get(runner).getName());
-                assignedExecutor = executors.get(runner).getName();
-                mapping.assign(workchunk, executors.get(runner));
+                LOGGER.log(FINE, "Scheduling '" + subtask + "', label '" + label + "' on '" + assignedExecutor + "'");
             }
-
-            if (!mapping.isPartiallyValid()) {
-                LOGGER.log(WARNING, "Unable to schedule '" + label + "': Mapping to '" + assignedExecutor + "' not partially valid");
-                return false;
-            }
-
-            LOGGER.log(FINE, "Scheduling label '" + label + "' on '" + assignedExecutor + "'");
         }
 
         return true;
